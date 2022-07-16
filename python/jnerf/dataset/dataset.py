@@ -79,7 +79,11 @@ def write_image(file, img, quality=95):
 
 @DATASETS.register_module()
 class NerfDataset():
-    def __init__(self,root_dir, batch_size, mode='train', H=0, W=0, correct_pose=[1,-1,-1], aabb_scale=None, scale=None, offset=None, img_alpha=True,to_jt=True, have_img=True, preload_shuffle=True):
+    def __init__(self,root_dir, batch_size, mode='train', H=0, W=0, correct_pose=[1,-1,-1], aabb_scale=None, scale=None, offset=None, img_alpha=True,to_jt=True, have_img=True, preload_shuffle=True, 
+                            train_select = False, ):
+
+        self.train_select = train_select
+
         self.root_dir=root_dir
         self.batch_size=batch_size
         self.preload_shuffle=preload_shuffle
@@ -108,18 +112,22 @@ class NerfDataset():
         assert mode=="train" or mode=="val" or mode=="test"
         self.mode=mode
         self.idx_now=0
-        self.load_data()
+
+        self.load_data() 
         jt.gc()
         self.image_data = self.image_data.reshape(
             self.n_images, -1, 4).detach()
 
     def __next__(self):
+
         if self.idx_now+self.batch_size >= self.shuffle_index.shape[0]:
             del self.shuffle_index
             self.shuffle_index=jt.randperm(self.n_images*self.H*self.W).detach()
             jt.gc()
-            self.idx_now = 0      
+            self.idx_now = 0
+                
         img_index=self.shuffle_index[self.idx_now:self.idx_now+self.batch_size]
+        #img_index = jt.misc.randperm(self.idx_now,self.idx_now+self.batch_size)
         img_ids,rays_o,rays_d,rgb_target=self.generate_random_data(img_index,self.batch_size)
         self.idx_now+=self.batch_size
         return img_ids, rays_o, rays_d, rgb_target
@@ -133,18 +141,30 @@ class NerfDataset():
         for root, dirs, files in os.walk(root_dir):
             for file in files:
                 if os.path.splitext(file)[1] == ".json":
-                    if self.mode in os.path.splitext(file)[0] or (self.mode=="train" and "val" in os.path.splitext(file)[0]):
+                    #if self.mode in os.path.splitext(file)[0] or (self.mode=="train" and "val" in os.path.splitext(file)[0]):
+                    if self.mode in os.path.splitext(file)[0] or (self.mode=="train" in os.path.splitext(file)[0]):
                         json_paths.append(os.path.join(root, file))
+
         json_data=None
         ## get frames
         for json_path in json_paths:
-
             with open(json_path,'r')as f:
                 data=json.load(f)
             if json_data is None:
                 json_data=data
             else:
                 json_data['frames']+=data['frames']
+        ##################################### select
+        if self.train_select:
+            select_image_list = np.load(os.path.join(root_dir,'train.npy'))
+            json_data_frame_select = []
+            for json_data_frame in json_data['frames']:
+                file_name = os.path.basename(json_data_frame['file_path'])
+                if file_name in select_image_list:
+                    json_data_frame_select.append(json_data_frame)
+            json_data['frames'] = json_data_frame_select
+            
+
 
         ## init set  scale & offset
         if 'h' in json_data:
@@ -174,7 +194,7 @@ class NerfDataset():
             matrix=np.array(frame['transform_matrix'],np.float32)[:-1, :]
             self.transforms_gpu.append(
                             self.matrix_nerf2ngp(matrix, self.scale, self.offset))
-                           
+
         self.resolution=[self.W,self.H]
         self.resolution_gpu=jt.array(self.resolution)
         metadata=np.empty([11],np.float32)

@@ -10,7 +10,8 @@ from jnerf.utils.registry import build_from_cfg,NETWORKS,SCHEDULERS,DATASETS,OPT
 from jnerf.models.losses.mse_loss import img2mse, mse2psnr
 from jnerf.dataset import camera_path
 import cv2
-
+from jittor import Function, float32
+from jittor import nn
 class Runner():
     def __init__(self):
         self.cfg = get_cfg()
@@ -29,12 +30,16 @@ class Runner():
             self.dataset["val"] = self.dataset["train"]
         self.dataset["test"]    = None
         self.model              = build_from_cfg(self.cfg.model, NETWORKS)
+
+
         self.cfg.model_obj      = self.model
         self.sampler            = build_from_cfg(self.cfg.sampler, SAMPLERS)
         self.cfg.sampler_obj    = self.sampler
+        
         self.optimizer          = build_from_cfg(self.cfg.optim, OPTIMS, params=self.model.parameters())
         self.optimizer          = build_from_cfg(self.cfg.expdecay, OPTIMS, nested_optimizer=self.optimizer)
-        self.ema_optimizer      = build_from_cfg(self.cfg.ema, OPTIMS, params=self.model.parameters())
+        self.ema_optimizer      = build_from_cfg(self.cfg.ema, OPTIMS, params=self.model.parameters()) 
+
         self.loss_func          = build_from_cfg(self.cfg.loss, LOSSES)
         self.background_color   = self.cfg.background_color
         self.tot_train_steps    = self.cfg.tot_train_steps
@@ -58,15 +63,18 @@ class Runner():
         self.W = self.image_resolutions[0]
         self.H = self.image_resolutions[1]
 
-    def train(self):
+    def train(self):   
+
         for i in tqdm(range(self.start, self.tot_train_steps)):
             self.cfg.m_training_step = i
-            img_ids, rays_o, rays_d, rgb_target = next(self.dataset["train"])
+            img_ids, rays_o, rays_d, rgb_target = next(self.dataset["train"])         
+
             training_background_color = jt.random([rgb_target.shape[0],3]).stop_grad()
 
             rgb_target = (rgb_target[..., :3] * rgb_target[..., 3:] + training_background_color * (1 - rgb_target[..., 3:])).detach()
 
             pos, dir = self.sampler.sample(img_ids, rays_o, rays_d, is_training=True)
+            
             network_outputs = self.model(pos, dir)
             rgb = self.sampler.rays2rgb(network_outputs, training_background_color)
 
@@ -75,13 +83,33 @@ class Runner():
             self.ema_optimizer.ema_step()
             if self.using_fp16:
                 self.model.set_fp16()
-
             if i>0 and i%self.val_freq==0:
-                psnr=mse2psnr(self.val_img(i))
-                print("STEP={} | LOSS={} | VAL PSNR={}".format(i,loss.mean().item(), psnr))
+                print("STEP={} | LOSS={} ".format(i,loss.mean().item()))
+            #    psnr=mse2psnr(self.val_img(i))
+            #    print("STEP={} | LOSS={} | VAL PSNR={}".format(i,loss.mean().item(), psnr))
         self.save_ckpt(os.path.join(self.save_path, "params.pkl"))
-        self.test()
-    
+        self.test()        
+
+
+    def render_train(self, save_img=True, save_path=None):
+        if save_path is None:
+            save_path = self.save_path
+        mse_list = []
+        print("rendering trainset...")
+        for img_i in tqdm(range(0,self.dataset["train"].n_images,1)):
+            if img_i<10:
+                continue
+            with jt.no_grad():
+                imgs=[]
+                for i in range(1):
+                    simg, img_tar = self.render_img(dataset_mode="train", img_id=img_i)
+                    imgs.append(simg)
+                img = np.stack(imgs, axis=0).mean(0)
+
+                if save_img:
+                    self.save_img(save_path+f"/r_{img_i-10}.png", img)
+        return 
+
     def test(self, load_ckpt=False):
         if load_ckpt:
             assert os.path.exists(self.ckpt_path), "ckpt file does not exist: "+self.ckpt_path
@@ -91,6 +119,10 @@ class Runner():
         if not os.path.exists(os.path.join(self.save_path, "test")):
             os.makedirs(os.path.join(self.save_path, "test"))
         mse_list=self.render_test(save_path=os.path.join(self.save_path, "test"))
+        #if not os.path.exists(self.save_path):
+        #    os.makedirs(self.save_path)
+        #mse_list=self.render_test(save_path=self.save_path)
+
         if self.dataset["test"].have_img:
             tot_psnr=0
             for mse in mse_list:
@@ -128,6 +160,7 @@ class Runner():
             'nested_optimizer': self.optimizer._nested_optimizer.state_dict(),
             'ema_optimizer': self.ema_optimizer.state_dict(),
         }, path)
+
 
     def load_ckpt(self, path):
         print("Loading ckpt from:",path)
@@ -200,6 +233,7 @@ class Runner():
             img_ids, W, H)
         rays_pix_total = rays_pix_total.unsqueeze(-1)
         pixel = 0
+        self.n_rays_per_batch = 1024
         imgs = np.empty([H*W+self.n_rays_per_batch, 3])
         for pixel in range(0, W*H, self.n_rays_per_batch):
             end = pixel+self.n_rays_per_batch
@@ -210,10 +244,12 @@ class Runner():
                     [rays_o, jt.ones([end-H*W]+rays_o.shape[1:], rays_o.dtype)], dim=0)
                 rays_d = jt.concat(
                     [rays_d, jt.ones([end-H*W]+rays_d.shape[1:], rays_d.dtype)], dim=0)
-
+        
             pos, dir = self.sampler.sample(img_ids, rays_o, rays_d)
+
             network_outputs = self.model(pos, dir)
             rgb = self.sampler.rays2rgb(network_outputs, inference=True)
+
             imgs[pixel:end] = rgb.numpy()
         imgs = imgs[:H*W].reshape(H, W, 3)
         imgs_tar=jt.array(self.dataset[dataset_mode].image_data[img_id]).reshape(H, W, 4)
@@ -244,3 +280,4 @@ class Runner():
             img[pixel:end] = rgb.numpy()
         img = img[:H*W].reshape(H, W, 3)
         return img
+

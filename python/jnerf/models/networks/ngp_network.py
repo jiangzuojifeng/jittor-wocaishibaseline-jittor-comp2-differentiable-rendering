@@ -51,6 +51,8 @@ class NGPNetworks(nn.Module):
             assert self.pos_encoder.out_dim%16==0
             assert self.dir_encoder.out_dim%16==0
             self.density_mlp = FMLP([self.pos_encoder.out_dim, density_n_neurons, 16])
+            #self.rgb_mlp1 = FMLP([self.dir_encoder.out_dim, 32, 3])######################################
+            #self.rgb_mlp = FMLP([self.dir_encoder.out_dim+3, 32, 3])######################################
             self.rgb_mlp = FMLP([self.dir_encoder.out_dim+16, rgb_n_neurons, rgb_n_neurons, 3])
         else:
             if self.use_fully and not (jt.flags.cuda_archs[0] >= 75):
@@ -65,7 +67,8 @@ class NGPNetworks(nn.Module):
                             nn.ReLU(),
                             nn.Linear(rgb_n_neurons, rgb_n_neurons, bias=False),
                             nn.ReLU(),
-                            nn.Linear(rgb_n_neurons, 3, bias=False))
+                            nn.Linear(rgb_n_neurons, 3, bias=False))########################################
+                            #nn.Linear(rgb_n_neurons, 3, bias=False)) 
         self.set_fp16()
 
     def execute(self, pos_input, dir_input):  
@@ -81,6 +84,9 @@ class NGPNetworks(nn.Module):
         density = self.density_mlp(pos_input)
         rgb = jt.concat([density, dir_input], -1)
         rgb = self.rgb_mlp(rgb)
+        #rgb1 = self.rgb_mlp1(density)
+        #rgb = jt.concat([rgb1, dir_input], -1)
+        #rgb = self.rgb_mlp(rgb)
         outputs = jt.concat([rgb, density[..., :1]], -1)  # batchsize 4: rgbd
         return outputs
 
@@ -93,5 +99,6 @@ class NGPNetworks(nn.Module):
         if self.using_fp16:
             self.density_mlp.float16()
             self.rgb_mlp.float16()
+            #self.rgb_mlp1.float16()#################
             self.pos_encoder.float16()
             self.dir_encoder.float16()

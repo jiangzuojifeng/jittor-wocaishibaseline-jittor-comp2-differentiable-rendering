@@ -46,6 +46,7 @@ class CalcRgb(Function):
         self.rays_numsteps_compacted = rays_numsteps_compacted.detach()
         self.coords_in = coords_in.detach()
         self.n_rays_per_batch=rays_numsteps.shape[0]
+        #rgb_output = jt.code((self.n_rays_per_batch, 3), 'float32',
         rgb_output = jt.code((self.n_rays_per_batch, 3), 'float32',
                              inputs=[network_output, coords_in, rays_numsteps, rays_numsteps_compacted,training_background_color], 
                              cuda_header=global_headers+self.density_grad_header+'#include "calc_rgb.h"', cuda_src=f"""
@@ -71,7 +72,7 @@ class CalcRgb(Function):
             PitchedPtr<NerfCoordinate>((NerfCoordinate*)coords_in_p, 1, 0, 0),(uint32_t*)rays_numsteps_p,(Array3f*)rgb_output_p,(uint32_t*)rays_numsteps_compacted_p,(Array3f*)training_background_color_p,NERF_CASCADES(),MIN_CONE_STEPSIZE());
            
 """)
-
+        #rgb_output = rgb_output[..., 3:]*rgb_output[..., :3] + training_background_color * (1 - rgb_output[..., :3])
         rgb_output.compile_options = self.rgb_options
         rgb_output.sync()
         self.rgb_output = rgb_output.detach()

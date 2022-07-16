@@ -4,11 +4,8 @@
 </div>
 
 ## Introduction
+本项目是第二届计图挑战赛的正式赛题项目，赛题为可微渲染新视角生成赛题，项目使用官方baseline代码JNeRF，针对部分场景提出方法调整，可给予给定数据集完成NeRF训练和新视角图像生成。
 JNeRF is an NeRF benchmark based on [Jittor](https://github.com/Jittor/jittor). JNeRF supports Instant-NGP capable of training NeRF in 5 seconds and achieves similar performance and speed to the paper.
-
-5s training demo of Instant-NGP implemented by JNeRF:
-
-<img src="docs/demo_5s.gif" width="300"/>
 
 ## Install
 JNeRF environment requirements:
@@ -51,92 +48,62 @@ After installation, you can ```import jnerf``` in python interpreter to check if
 
 ### Datasets
 
-We use fox datasets and blender lego datasets for training demonstrations. 
-
-#### Fox Dataset
-We provided fox dataset (from [Instant-NGP](https://github.com/NVlabs/instant-ngp)) in this repository at `./data/fox`.
-
-#### Lego Dataset
-You can download the lego dataset in nerf_example_data.zip at https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1. And move `lego` folder to `./data/lego`.
+项目使用官方给定的数据集，如`./data/Car`.
 
 #### Customized Datasets
 
-If you want to train JNerf with your own dataset, then you should follow the format of our datasets. You should split your datasets into training, validation and testing sets. Each set should be paired with a json file that describes the camera parameters of each images.
+针对新数据的训练，新数据集的目录格式需与现有格式一致。指定目录下包括 `test、train、val` 三种数据，并给定相对应的参数文件（相机参数）。
 
 ### Config
 
-We organize our configs of JNeRF in projects/. You are referred to `./projects/ngp/configs/ngp_base.py` to learn how it works.
+训练相关配置位于`./projects/ngp/configs/`
 
 ### Train from scratch
 
-You can train from scratch on the `lego` scene with the following command. It should be noted that since jittor is a just-in-time compilation framework, it will take some time to compile on the first run.
+项目基础版本的训练基于JNeRF使用如下命令进行。
+
 ```shell
-python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base.py
+python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base_car.py
 ```
-NOTE: Competitors participating in the Jittor AI Challenge can use `./projects/ngp/configs/ngp_comp.py` as config.
+
+针对赛题部分场景的渲染难题，本项目提出二次渲染的方法。
+首先，使用如下命令将`train`数据变化为黑色图像，根据对应数据改变python文件中的目录
+
+```shell
+python image_black.py
+```
+
+变化结果保存在`./data/Car/train_b`等文件夹，将其复制于`./data/Car/train`文件夹，对于二值化数据进行训练，将`./data/Car/transforms_train.json`中数据复制到`./data/Car/transforms_test.json`，并对于`train`数据完成渲染。
+
+```shell
+python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base_car.py
+```
+
+使用如下命令对于训练图像序列进行筛选，生成筛选参数，根据对应数据改变python文件中的目录
+
+```shell
+python image_select.py
+```
+
+将`./data/Car/train`以及`./data/Car/transforms_test.json`恢复为原数据，在`./projects/ngp/configs/ngp_base_car.py`配置文件中`dataset/train/`增加`train_select = True`,参数，使用如下命令进行渲染。
+
+```shell
+python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base_car.py
+```
 
 ### Test with pre-trained model
 
-After training, the ckpt file `params.pkl` will be automatically saved in `./logs/lego/`. And you can modify the ckpt file path by setting the `ckpt_path` in the config file. 
+训练生成的参数信息被保存在`./logs/Car/`等目录下，基于保存的参数针对`test`数据完成渲染使用以下命令，结果保存在`./logs/Car/test/`等目录下。
 
-Set the `--task` of the command to `test` to test with pre-trained model:
 ```shell
 python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base.py --task test
 ```
 
-### Render demo video
+针对赛题完成所有场景`test`渲染使用以下命令，结果保存在`./result/`目录下。
 
-Set the `--task` of the command to `render` to render demo video `demo.mp4` with specified camera path based on pre-trained model:
 ```shell
-python tools/run_net.py --config-file ./projects/ngp/configs/ngp_base.py --task render
+python test.py
 ```
-
-## Performance
-
-Instant-ngp implemented by JNeRF achieves similar performance and speed to the paper. The performance comparison can be seen in the table below and training speed of JNeRF-NGP on RTX 3090 is about 133 iters/s. 
-
-
-|    Models     |    implementation      | Dataset | PSNR |
-|----|---|---|---|
-| Instant-ngp | paper | lego | 36.39(5min) |
-| Instant-ngp | JNeRF | lego | 36.41(5min) |
-| NeRF        | JNeRF | lego | 32.49 |
-
-## Plan of Models
-
-JNeRF will support more valuable NeRF models in the future, if you are also interested in JNeRF and want to improve it, welcome to submit PR!
-
-<b>:heavy_check_mark:Supported  :clock3:Doing :heavy_plus_sign:TODO</b>
-
-- :heavy_check_mark: Instant-NGP
-- :heavy_check_mark: NeRF
-- :clock3: Mip-NeRF
-- :clock3: PaletteNeRF
-- :clock3: Plenoxels
-- :heavy_plus_sign: StylizedNeRF
-- :heavy_plus_sign: NeRF-Editing
-- :heavy_plus_sign: DrawingInStyles
-- :heavy_plus_sign: NSVF
-- :heavy_plus_sign: NeRFactor
-- :heavy_plus_sign: pixelNeRF
-- :heavy_plus_sign: Recursive-NeRF
-- :heavy_plus_sign: StyleNeRF
-- :heavy_plus_sign: EG3D
-- :heavy_plus_sign: ...
-
-## Contact Us
-
-If you are interested in JNeRF or NeRF research and want to build the JNeRF community with us, contributing is very welcome, please contact us! 
-
-Email: jittor@qq.com
-
-JNeRF QQ Group: 689063884
-
-<img src="docs/jnerf_qrcode.jpg" width="200"/>
-
-If you have any questions about Jittor, you can [file an issue](https://github.com/Jittor/jittor/issues), or join our Jittor QQ Group: 761222083
-
-<img src="docs/jittor_qrcode.jpg" width="200"/>
 
 ## Acknowledgements
 
@@ -149,7 +116,6 @@ Their licenses can be seen at `licenses/`, many thanks for their nice work!
 
 
 ## Citation
-
 
 ```
 @article{hu2020jittor,
