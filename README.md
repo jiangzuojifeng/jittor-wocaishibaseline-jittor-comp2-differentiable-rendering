@@ -26,8 +26,6 @@ JNeRF environment requirements:
 **Step 1: Install the requirements**
 ```shell
 sudo apt-get install tcl-dev tk-dev python3-tk
-git clone https://github.com/Jittor/JNeRF
-cd JNeRF
 python -m pip install -r requirements.txt
 ```
 If you have any installation problems for Jittor, please refer to [Jittor](https://github.com/Jittor/jittor)
